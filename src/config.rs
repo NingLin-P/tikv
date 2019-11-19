@@ -1677,6 +1677,10 @@ impl ConfigController {
         self.config_mgr.insert(module, cfg_mgr);
     }
 
+    pub fn get_cfg(&self) -> &TiKvConfig {
+        &self.current_config
+    }
+
     // fn update(&mut self, _module: String, _name: String, _value: String) {
     //     unimplemented!()
     // }

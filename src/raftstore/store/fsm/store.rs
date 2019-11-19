@@ -21,6 +21,7 @@ use std::{mem, thread, u64};
 use time::{self, Timespec};
 use tokio_threadpool::{Sender as ThreadPoolSender, ThreadPool};
 
+use crate::config::ConfigController;
 use crate::import::SSTImporter;
 use crate::raftstore::coprocessor::split_observer::SplitObserver;
 use crate::raftstore::coprocessor::{CoprocessorHost, RegionChangeEvent};
@@ -1001,7 +1002,7 @@ impl RaftBatchSystem {
             future_poller: workers.future_poller.sender().clone(),
         };
         let region_peers = builder.init()?;
-        self.start_system(workers, region_peers, builder)?;
+        self.start_system(workers, region_peers, builder, cfg_controller)?;
         Ok(())
     }
 
@@ -1010,6 +1011,7 @@ impl RaftBatchSystem {
         mut workers: Workers,
         region_peers: Vec<(LooseBoundedSender<PeerMsg>, Box<PeerFsm>)>,
         builder: RaftPollerBuilder<T, C>,
+        mut cfg_controller: ConfigController,
     ) -> Result<()> {
         builder.snap_mgr.init()?;
 
@@ -1072,6 +1074,7 @@ impl RaftBatchSystem {
             Arc::clone(&engines.kv),
             self.router.clone(),
             Arc::clone(&workers.coprocessor_host),
+            cfg_controller.get_cfg().coprocessor.clone(),
         );
         box_try!(workers.split_check_worker.start(split_check_runner));
 

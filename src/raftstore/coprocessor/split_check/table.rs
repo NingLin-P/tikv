@@ -81,6 +81,9 @@ impl SplitCheckObserver for TableCheckObserver {
         engine: &DB,
         policy: CheckPolicy,
     ) {
+        if !host.cfg.split_region_on_table {
+            return;
+        }
         let region = ctx.region();
         if is_same_table(region.get_start_key(), region.get_end_key()) {
             // Region is inside a table, skip for saving IO.
@@ -333,9 +336,9 @@ mod tests {
         cfg.region_max_keys = 2000000000;
         cfg.region_split_keys = 1000000000;
         // Try to ignore the ApproximateRegionSize
-        let coprocessor = CoprocessorHost::new(cfg, stx);
+        let coprocessor = CoprocessorHost::new(stx);
         let mut runnable =
-            SplitCheckRunner::new(Arc::clone(&engine), tx.clone(), Arc::new(coprocessor));
+            SplitCheckRunner::new(Arc::clone(&engine), tx.clone(), Arc::new(coprocessor), cfg);
 
         type Case = (Option<Vec<u8>>, Option<Vec<u8>>, Option<i64>);
         let mut check_cases = |cases: Vec<Case>| {
