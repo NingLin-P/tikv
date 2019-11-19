@@ -6,6 +6,7 @@
 //! made up of many other configuration types.
 
 use std::cmp;
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::i32;
@@ -1623,6 +1624,68 @@ pub fn persist_critical_config(config: &TiKvConfig) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+pub trait ConfigManager {
+    // type Conf;
+    fn update(&mut self, _: &TiKvConfig);
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub enum Module {
+    Raftstore,
+    Rocksdb,
+    Raftdb,
+    SplitChecker,
+    Coprocessor,
+    GcWorker,
+    PessimisticTxn,
+    ReadPool,
+    Server,
+    Storage,
+    Unknown,
+}
+
+impl From<&str> for Module {
+    fn from(module: &str) -> Module {
+        match module {
+            "raftstore" => Module::Raftstore,
+            "rocksdb" => Module::Rocksdb,
+            "raftdb" => Module::Raftdb,
+            "coprocessor" => Module::SplitChecker,
+            "server" => Module::Server,
+            // TODO: add more
+            _ => Module::Unknown,
+        }
+    }
+}
+
+pub struct ConfigController {
+    current_config: TiKvConfig,
+    config_mgr: HashMap<Module, Box<dyn ConfigManager>>,
+}
+
+impl ConfigController {
+    pub fn new(cfg: TiKvConfig) -> Self {
+        ConfigController {
+            current_config: cfg,
+            config_mgr: HashMap::new(),
+        }
+    }
+
+    pub fn register(&mut self, module: Module, cfg_mgr: Box<dyn ConfigManager>) {
+        self.config_mgr.insert(module, cfg_mgr);
+    }
+
+    // fn update(&mut self, _module: String, _name: String, _value: String) {
+    //     unimplemented!()
+    // }
+
+    // fn update_module(&mut self, module: Module, cfg: Box<dyn CFG>) {
+    //     if let Some(cur_cfg) = self.config_mgr.get_mut(&module) {
+    //         cur_cfg.update(cfg);
+    //     }
+    // }
 }
 
 #[cfg(test)]

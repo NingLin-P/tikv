@@ -954,6 +954,7 @@ impl RaftBatchSystem {
         store_meta: Arc<Mutex<StoreMeta>>,
         mut coprocessor_host: CoprocessorHost,
         importer: Arc<SSTImporter>,
+        mut cfg_controller: ConfigController,
     ) -> Result<()> {
         assert!(self.workers.is_none());
         // TODO: we can get cluster meta regularly too later.
