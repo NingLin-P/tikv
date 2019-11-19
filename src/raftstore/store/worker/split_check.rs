@@ -120,16 +120,18 @@ impl<'a> MergedIterator<'a> {
     }
 }
 
-/// Split checking task.
-pub struct Task {
-    region: Region,
-    auto_split: bool,
-    policy: CheckPolicy,
+pub enum Task {
+    SplitCheckTask {
+        region: Region,
+        auto_split: bool,
+        policy: CheckPolicy,
+    },
+    ChangeConfig(Config),
 }
 
 impl Task {
-    pub fn new(region: Region, auto_split: bool, policy: CheckPolicy) -> Task {
-        Task {
+    pub fn new_split_check(region: Region, auto_split: bool, policy: CheckPolicy) -> Task {
+        Task::SplitCheckTask {
             region,
             auto_split,
             policy,
@@ -139,12 +141,19 @@ impl Task {
 
 impl Display for Task {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Split Check Task for {}, auto_split: {:?}",
-            self.region.get_id(),
-            self.auto_split
-        )
+        match self {
+            Task::SplitCheckTask {
+                region, auto_split, ..
+            } => write!(
+                f,
+                "[split check worker] Split Check Task for {}, auto_split: {:?}",
+                region.get_id(),
+                auto_split
+            ),
+            Task::ChangeConfig(cfg) => {
+                write!(f, "[split check worker] Change Config Task: {:?}", cfg)
+            }
+        }
     }
 }
 
@@ -171,8 +180,7 @@ impl<S: CasualRouter> Runner<S> {
     }
 
     /// Checks a Region with split checkers to produce split keys and generates split admin command.
-    fn check_split(&mut self, task: Task) {
-        let region = &task.region;
+    fn check_split(&mut self, region: &Region, auto_split: bool, policy: CheckPolicy) {
         let region_id = region.get_id();
         let start_key = keys::enc_start_key(region);
         let end_key = keys::enc_end_key(region);
@@ -184,9 +192,9 @@ impl<S: CasualRouter> Runner<S> {
         );
         CHECK_SPILT_COUNTER_VEC.with_label_values(&["all"]).inc();
 
-        let mut host = SplitCheckerHost::new(task.auto_split, &self.cfg);
+        let mut host = SplitCheckerHost::new(auto_split, &self.cfg);
         self.coprocessor
-            .add_split_checker(&mut host, region, &self.engine, task.policy);
+            .add_split_checker(&mut host, region, &self.engine, policy);
         if host.skip() {
             debug!("skip split check"; "region_id" => region.get_id());
             return;
@@ -288,11 +296,22 @@ impl<S: CasualRouter> Runner<S> {
 
         Ok(host.split_keys())
     }
+
+    fn change_cfg(&mut self, incomming: Config) {
+        self.cfg = incomming;
+    }
 }
 
 impl<S: CasualRouter> Runnable<Task> for Runner<S> {
     fn run(&mut self, task: Task) {
-        self.check_split(task);
+        match task {
+            Task::SplitCheckTask {
+                region,
+                auto_split,
+                policy,
+            } => self.check_split(&region, auto_split, policy),
+            Task::ChangeConfig(c) => self.change_cfg(c),
+        }
     }
 }
 

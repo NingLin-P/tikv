@@ -224,14 +224,14 @@ mod tests {
             // Flush for every key so that we can know the exact middle key.
             engine.flush_cf(cf_handle, true).unwrap();
         }
-        runnable.run(SplitCheckTask::new(
+        runnable.run(SplitCheckTask::new_split_check(
             region.clone(),
             false,
             CheckPolicy::Scan,
         ));
         let split_key = Key::from_raw(b"0005");
         must_split_at(&rx, &region, vec![split_key.clone().into_encoded()]);
-        runnable.run(SplitCheckTask::new(
+        runnable.run(SplitCheckTask::new_split_check(
             region.clone(),
             false,
             CheckPolicy::Approximate,

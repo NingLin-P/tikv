@@ -21,8 +21,9 @@ use std::{mem, thread, u64};
 use time::{self, Timespec};
 use tokio_threadpool::{Sender as ThreadPoolSender, ThreadPool};
 
-use crate::config::ConfigController;
+use crate::config::{ConfigController, Module};
 use crate::import::SSTImporter;
+use crate::raftstore::coprocessor::config::CfgManager as SplitCheckCfgManager;
 use crate::raftstore::coprocessor::split_observer::SplitObserver;
 use crate::raftstore::coprocessor::{CoprocessorHost, RegionChangeEvent};
 use crate::raftstore::store::config::Config;
@@ -1014,6 +1015,11 @@ impl RaftBatchSystem {
         mut cfg_controller: ConfigController,
     ) -> Result<()> {
         builder.snap_mgr.init()?;
+
+        cfg_controller.register(
+            Module::SplitChecker,
+            Box::new(SplitCheckCfgManager(workers.split_check_worker.scheduler())),
+        );
 
         let engines = builder.engines.clone();
         let snap_mgr = builder.snap_mgr.clone();

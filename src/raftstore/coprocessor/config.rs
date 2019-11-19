@@ -1,7 +1,10 @@
 // Copyright 2017 TiKV Project Authors. Licensed under Apache-2.0.
 
 use super::Result;
+use crate::config::{ConfigManager, TiKvConfig};
+use crate::raftstore::store::SplitCheckTask;
 use tikv_util::config::ReadableSize;
+use tikv_util::worker::Scheduler;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -66,6 +69,23 @@ impl Config {
             ));
         }
         Ok(())
+    }
+}
+
+// TODO: visiable
+pub struct CfgManager(pub Scheduler<SplitCheckTask>);
+
+impl ConfigManager for CfgManager {
+    fn update(&mut self, cfg: &TiKvConfig) {
+        if let Err(e) = self
+            .0
+            .schedule(SplitCheckTask::ChangeConfig(cfg.coprocessor.clone()))
+        {
+            error!(
+                "[split check] failed to schedule change config task";
+                "err" => %e,
+            );
+        }
     }
 }
 
