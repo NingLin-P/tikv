@@ -21,6 +21,7 @@ use std::{mem, thread, u64};
 use time::{self, Timespec};
 use tokio_threadpool::{Sender as ThreadPoolSender, ThreadPool};
 
+use crate::config::{ConfigController, Module};
 use crate::import::SSTImporter;
 use crate::raftstore::coprocessor::split_observer::SplitObserver;
 use crate::raftstore::coprocessor::{CoprocessorHost, RegionChangeEvent};
@@ -954,6 +955,7 @@ impl RaftBatchSystem {
         store_meta: Arc<Mutex<StoreMeta>>,
         mut coprocessor_host: CoprocessorHost,
         importer: Arc<SSTImporter>,
+        mut cfg_controller: ConfigController,
     ) -> Result<()> {
         assert!(self.workers.is_none());
         // TODO: we can get cluster meta regularly too later.

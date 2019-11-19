@@ -17,7 +17,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
-use tikv::config::TiKvConfig;
+use tikv::config::{ConfigController, TiKvConfig};
 use tikv::coprocessor;
 use tikv::import::{ImportSSTService, SSTImporter};
 use tikv::raftstore::coprocessor::{CoprocessorHost, RegionInfoAccessor};
@@ -87,6 +87,7 @@ fn run_raft_server(pd_client: RpcClient, cfg: &TiKvConfig, security_mgr: Arc<Sec
     let snap_path = store_path.join(Path::new("snap"));
     let raft_db_path = Path::new(&cfg.raft_store.raftdb_path);
     let import_path = store_path.join("import");
+    let cfg_controller = ConfigController::new(cfg.clone());
 
     let f = File::create(lock_path.as_path())
         .unwrap_or_else(|e| fatal!("failed to create lock at {}: {}", lock_path.display(), e));
@@ -306,6 +307,7 @@ fn run_raft_server(pd_client: RpcClient, cfg: &TiKvConfig, security_mgr: Arc<Sec
         store_meta,
         coprocessor_host,
         importer,
+        cfg_controller,
     )
     .unwrap_or_else(|e| fatal!("failed to start node: {}", e));
     initial_metric(&cfg.metric, Some(node.id()));
