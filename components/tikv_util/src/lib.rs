@@ -33,6 +33,7 @@ use protobuf::Message;
 use rand;
 use rand::rngs::ThreadRng;
 
+pub mod broacast;
 pub mod codec;
 pub mod collections;
 pub mod config;

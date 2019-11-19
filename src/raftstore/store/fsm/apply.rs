@@ -41,6 +41,7 @@ use crate::raftstore::store::util::check_region_epoch;
 use crate::raftstore::store::util::KeysInfoFormatter;
 use crate::raftstore::store::{cmd_resp, keys, util, Config};
 use crate::raftstore::{Error, Result};
+use tikv_util::broacast::Receiver as ConfigRecv;
 use tikv_util::escape;
 use tikv_util::mpsc::{loose_bounded, LooseBoundedSender, Receiver};
 use tikv_util::time::{duration_to_sec, Instant, SlowTimer};
@@ -2729,10 +2730,25 @@ pub struct ApplyPoller {
     msg_buf: Vec<Msg>,
     apply_ctx: ApplyContext,
     messages_per_tick: usize,
+    cfg_recv: ConfigRecv<Config>,
 }
 
 impl PollHandler<ApplyFsm, ControlFsm> for ApplyPoller {
-    fn begin(&mut self, _batch_size: usize) {}
+    fn begin(&mut self, _batch_size: usize) {
+        if let Some(incomming) = self.cfg_recv.any_new() {
+            // update config
+            if self.messages_per_tick != incomming.messages_per_tick {
+                self.messages_per_tick = incomming.messages_per_tick;
+                // TODO: resize self.msg_buf to new size
+            }
+            if self.apply_ctx.enable_sync_log != incomming.sync_log {
+                self.apply_ctx.enable_sync_log = incomming.sync_log;
+            }
+            if self.apply_ctx.use_delete_range != incomming.use_delete_range {
+                self.apply_ctx.use_delete_range = incomming.use_delete_range;
+            }
+        }
+    }
 
     /// There is no control fsm in apply poller.
     fn handle_control(&mut self, _: &mut ControlFsm) -> Option<usize> {
@@ -2796,6 +2812,7 @@ pub struct Builder {
     engines: Engines,
     sender: Notifier,
     router: ApplyRouter,
+    cfg_recv: ConfigRecv<Config>,
 }
 
 impl Builder {
@@ -2813,6 +2830,7 @@ impl Builder {
             engines: builder.engines.clone(),
             sender,
             router,
+            cfg_recv: builder.cfg_recv.clone(),
         }
     }
 }
@@ -2834,6 +2852,7 @@ impl HandlerBuilder<ApplyFsm, ControlFsm> for Builder {
                 &self.cfg,
             ),
             messages_per_tick: self.cfg.messages_per_tick,
+            cfg_recv: self.cfg_recv.clone(),
         }
     }
 }
@@ -2930,6 +2949,7 @@ mod tests {
     use crate::raftstore::store::msg::WriteResponse;
     use crate::raftstore::store::peer_storage::RAFT_INIT_LOG_INDEX;
     use crate::raftstore::store::util::{new_learner_peer, new_peer};
+    use crate::tikv_util::broacast::Broacast;
     use engine::rocks::Writable;
     use engine::{WriteBatch, DB};
     use engine_rocks::RocksEngine;
@@ -3078,6 +3098,7 @@ mod tests {
         let (region_scheduler, snapshot_rx) = dummy_scheduler();
         let cfg = Arc::new(Config::default());
         let (router, mut system) = create_apply_batch_system(&cfg);
+        let cfg_recv = Broacast::new(Config::default()).add_recv();
         let builder = super::Builder {
             tag: "test-store".to_owned(),
             cfg,
@@ -3087,6 +3108,7 @@ mod tests {
             sender,
             engines: engines.clone(),
             router: router.clone(),
+            cfg_recv,
         };
         system.spawn("test-basic".to_owned(), builder);
 
@@ -3423,6 +3445,7 @@ mod tests {
         let sender = Notifier::Sender(tx);
         let cfg = Arc::new(Config::default());
         let (router, mut system) = create_apply_batch_system(&cfg);
+        let cfg_recv = Broacast::new(Config::default()).add_recv();
         let builder = super::Builder {
             tag: "test-store".to_owned(),
             cfg,
@@ -3432,6 +3455,7 @@ mod tests {
             importer: importer.clone(),
             engines: engines.clone(),
             router: router.clone(),
+            cfg_recv,
         };
         system.spawn("test-handle-raft".to_owned(), builder);
 
@@ -3764,6 +3788,7 @@ mod tests {
         let (region_scheduler, _) = dummy_scheduler();
         let cfg = Arc::new(Config::default());
         let (router, mut system) = create_apply_batch_system(&cfg);
+        let cfg_recv = Broacast::new(Config::default()).add_recv();
         let builder = super::Builder {
             tag: "test-store".to_owned(),
             cfg,
@@ -3773,6 +3798,7 @@ mod tests {
             coprocessor_host: host,
             engines: engines.clone(),
             router: router.clone(),
+            cfg_recv,
         };
         system.spawn("test-split".to_owned(), builder);
 

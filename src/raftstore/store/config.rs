@@ -4,7 +4,9 @@ use std::time::Duration;
 use std::u64;
 use time::Duration as TimeDuration;
 
+use crate::config::{ConfigManager, TiKvConfig};
 use crate::raftstore::{coprocessor, Result};
+use tikv_util::broacast::Broacast;
 use tikv_util::config::{ReadableDuration, ReadableSize};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -201,6 +203,28 @@ impl Default for Config {
     }
 }
 
+macro_rules! update {
+    ($current: ident, $incomming: ident, $name: ident) => {
+        if $current.$name != $incomming.$name {
+            $current.$name = $incomming.$name
+        }
+    };
+}
+
+macro_rules! not_support {
+    ($module: ident, $current: ident, $incomming: ident, $name: ident) => {
+        if $current.$name != $incomming.$name {
+            debug!(
+                "config can not be overwrite";
+                "module" => stringify!($module),
+                "name" => stringify!($name),
+                "current" => ?$current.$name,
+                "incomming" => ?$incomming.$name
+            )
+        }
+    };
+}
+
 impl Config {
     pub fn new() -> Config {
         Config::default()
@@ -347,6 +371,26 @@ impl Config {
             return Err(box_err!("future-poll-size should be greater than 0."));
         }
         Ok(())
+    }
+
+    pub fn overwrite(&mut self, incomming: &Self) {
+        // raft
+        not_support!(raftstore, self, incomming, prevote);
+        not_support!(raftstore, self, incomming, raft_heartbeat_ticks);
+        not_support!(raftstore, self, incomming, raft_election_timeout_ticks);
+        not_support!(raftstore, self, incomming, raft_min_election_timeout_ticks);
+        not_support!(raftstore, self, incomming, raft_max_election_timeout_ticks);
+        not_support!(raftstore, self, incomming, raft_max_size_per_msg);
+        not_support!(raftstore, self, incomming, raft_max_inflight_msgs);
+        // thread pool
+        not_support!(raftstore, self, incomming, apply_pool_size);
+        not_support!(raftstore, self, incomming, store_pool_size);
+        not_support!(raftstore, self, incomming, future_poll_size);
+
+        update!(self, incomming, raft_base_tick_interval); // TODO: support?
+        update!(self, incomming, raft_entry_max_size);
+
+        // TODO: add more
     }
 
     pub fn write_into_metrics(&self) {
@@ -524,6 +568,22 @@ impl Config {
         metrics
             .with_label_values(&["future_poll_size"])
             .set(self.future_poll_size as f64);
+    }
+}
+
+pub struct ConfigMgr(pub Broacast<Config>);
+
+impl ConfigMgr {
+    pub fn new(c: Config) -> Self {
+        ConfigMgr(Broacast::new(c))
+    }
+}
+
+impl ConfigManager for ConfigMgr {
+    // type Conf = Config;
+
+    fn update(&mut self, incomming: &TiKvConfig) {
+        self.0.broacast(incomming.raft_store.clone());
     }
 }
 

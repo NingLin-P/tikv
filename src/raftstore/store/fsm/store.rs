@@ -21,6 +21,7 @@ use std::{mem, thread, u64};
 use time::{self, Timespec};
 use tokio_threadpool::{Sender as ThreadPoolSender, ThreadPool};
 
+use crate::config::{ConfigController, Module}; // TODO: no need to import Module here, since it impl From<&str>
 use crate::import::SSTImporter;
 use crate::raftstore::coprocessor::split_observer::SplitObserver;
 use crate::raftstore::coprocessor::{CoprocessorHost, RegionChangeEvent};
@@ -47,6 +48,7 @@ use crate::raftstore::store::worker::{
     ConsistencyCheckRunner, ConsistencyCheckTask, PdRunner, RaftlogGcRunner, RaftlogGcTask,
     ReadDelegate, RegionRunner, RegionTask, SplitCheckRunner, SplitCheckTask,
 };
+use crate::raftstore::store::ConfigMgr;
 use crate::raftstore::store::PdTask;
 use crate::raftstore::store::{
     util, Callback, CasualMessage, PeerMsg, RaftCommand, SignificantMsg, SnapManager,
@@ -57,6 +59,7 @@ use crate::storage::kv::{CompactedEvent, CompactionListener};
 use engine::Engines;
 use engine::{Iterable, Mutable, Peekable};
 use pd_client::PdClient;
+use tikv_util::broacast::Receiver as ConfigRecv;
 use tikv_util::collections::{HashMap, HashSet};
 use tikv_util::mpsc::{self, LooseBoundedSender, Receiver};
 use tikv_util::time::{duration_to_sec, SlowTimer};
@@ -457,6 +460,7 @@ pub struct RaftPoller<T: 'static, C: 'static> {
     poll_ctx: PollContext<T, C>,
     pending_proposals: Vec<RegionProposal>,
     messages_per_tick: usize,
+    cfg_recv: ConfigRecv<Config>,
 }
 
 impl<T: Transport, C: PdClient> RaftPoller<T, C> {
@@ -567,6 +571,9 @@ impl<T: Transport, C: PdClient> PollHandler<PeerFsm, StoreFsm> for RaftPoller<T,
         self.poll_ctx.pending_count = 0;
         self.poll_ctx.sync_log = false;
         self.poll_ctx.has_ready = false;
+        if let Some(cfg) = self.cfg_recv.any_new() {
+            self.poll_ctx.cfg = Arc::new(cfg);
+        }
         if self.pending_proposals.capacity() == 0 {
             self.pending_proposals = Vec::with_capacity(batch_size);
         }
@@ -696,6 +703,7 @@ pub struct RaftPollerBuilder<T, C> {
     global_stat: GlobalStoreStat,
     pub engines: Engines,
     applying_snap_count: Arc<AtomicUsize>,
+    pub cfg_recv: ConfigRecv<Config>,
 }
 
 impl<T, C> RaftPollerBuilder<T, C> {
@@ -913,6 +921,7 @@ where
             messages_per_tick: ctx.cfg.messages_per_tick,
             poll_ctx: ctx,
             pending_proposals: Vec::new(),
+            cfg_recv: self.cfg_recv.clone(),
         }
     }
 }
@@ -959,7 +968,7 @@ impl RaftBatchSystem {
         assert!(self.workers.is_none());
         // TODO: we can get cluster meta regularly too later.
         cfg.validate()?;
-
+        let cfg_mgr = ConfigMgr::new(cfg.clone());
         // TODO load coprocessors from configuration
         coprocessor_host
             .registry
@@ -999,7 +1008,9 @@ impl RaftBatchSystem {
             store_meta,
             applying_snap_count: Arc::new(AtomicUsize::new(0)),
             future_poller: workers.future_poller.sender().clone(),
+            cfg_recv: cfg_mgr.0.add_recv(),
         };
+        cfg_controller.register(Module::Raftstore, Box::new(cfg_mgr));
         let region_peers = builder.init()?;
         self.start_system(workers, region_peers, builder)?;
         Ok(())
