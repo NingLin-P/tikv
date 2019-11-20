@@ -17,7 +17,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
-use tikv::config::{ConfigController, TiKvConfig};
+use tikv::config::{ConfigController, Module, TiKvConfig};
 use tikv::coprocessor;
 use tikv::import::{ImportSSTService, SSTImporter};
 use tikv::raftstore::coprocessor::{CoprocessorHost, RegionInfoAccessor};
@@ -87,7 +87,7 @@ fn run_raft_server(pd_client: RpcClient, cfg: &TiKvConfig, security_mgr: Arc<Sec
     let snap_path = store_path.join(Path::new("snap"));
     let raft_db_path = Path::new(&cfg.raft_store.raftdb_path);
     let import_path = store_path.join("import");
-    let cfg_controller = ConfigController::new(cfg.clone());
+    let mut cfg_controller = ConfigController::new(cfg.clone());
 
     let f = File::create(lock_path.as_path())
         .unwrap_or_else(|e| fatal!("failed to create lock at {}: {}", lock_path.display(), e));
@@ -294,9 +294,10 @@ fn run_raft_server(pd_client: RpcClient, cfg: &TiKvConfig, security_mgr: Arc<Sec
     let region_info_accessor = RegionInfoAccessor::new(&mut coprocessor_host);
     region_info_accessor.start();
 
-    // Register the role change observer of the lock manager.
+    // Register the role change observer and the config manager of the lock manager.
     if let Some(lm) = lock_mgr.as_ref() {
         lm.register_detector_role_change_observer(&mut coprocessor_host);
+        cfg_controller.register(Module::PessimisticTxn, Box::new(lm.config_manager()));
     }
 
     node.start(
