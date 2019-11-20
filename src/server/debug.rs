@@ -809,12 +809,12 @@ impl<E: Engine> Debugger<E> {
             Module::Server => {
                 if config_name == GC_IO_LIMITER_CONFIG_NAME {
                     if let Ok(bytes_per_sec) = ReadableSize::from_str(config_value) {
-                        return self
-                            .gc_worker
+                        self.gc_worker
                             .as_ref()
                             .expect("must be some")
-                            .change_io_limit(bytes_per_sec.0)
-                            .map_err(|e| Error::Other(e.into()));
+                            .cfg()
+                            .update_with(|cfg| cfg.max_write_bytes_per_sec = bytes_per_sec);
+                        return Ok(());
                     }
                 }
                 Err(Error::InvalidArgument(format!(

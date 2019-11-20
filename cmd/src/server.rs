@@ -17,7 +17,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
-use tikv::config::{ConfigController, TiKvConfig};
+use tikv::config::{ConfigController, Module, TiKvConfig};
 use tikv::coprocessor;
 use tikv::import::{ImportSSTService, SSTImporter};
 use tikv::raftstore::coprocessor::{CoprocessorHost, RegionInfoAccessor};
@@ -194,6 +194,7 @@ fn run_raft_server(pd_client: RpcClient, cfg: &TiKvConfig, security_mgr: Arc<Sec
         Some(raft_router.clone()),
         cfg.gc.clone(),
     );
+    cfg_controller.register(Module::GcWorker, Box::new(gc_worker.cfg_mgr()));
     gc_worker
         .start()
         .unwrap_or_else(|e| fatal!("failed to start gc worker: {}", e));

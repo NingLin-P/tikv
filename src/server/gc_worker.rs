@@ -19,6 +19,7 @@ use kvproto::metapb;
 use log_wrappers::DisplayValue;
 use raft::StateRole;
 
+use crate::config::{ConfigManager, TiKvConfig};
 use crate::raftstore::store::keys;
 use crate::raftstore::store::msg::StoreMsg;
 use crate::raftstore::store::util::find_peer;
@@ -30,6 +31,7 @@ use crate::storage::{Callback, Error, Key, Result};
 use pd_client::PdClient;
 use tikv_util::config::ReadableSize;
 use tikv_util::time::{duration_to_sec, SlowTimer};
+use tikv_util::version_cache::{Getter, VersionCache};
 use tikv_util::worker::{self, Builder as WorkerBuilder, Runnable, ScheduleError, Worker};
 
 /// After the GC scan of a key, output a message to the log if there are at least this many
@@ -82,6 +84,14 @@ impl GCConfig {
             return Err(("gc.batch_keys should not be 0.").into());
         }
         Ok(())
+    }
+}
+
+struct ConfigMgr(VersionCache<GCConfig>);
+
+impl ConfigManager for ConfigMgr {
+    fn update(&mut self, cfg: &TiKvConfig) {
+        self.0.update(cfg.gc.clone())
     }
 }
 
@@ -166,9 +176,9 @@ struct GCRunner<E: Engine> {
     raft_store_router: Option<ServerRaftStoreRouter>,
 
     /// Used to limit the write flow of GC.
-    limiter: Arc<Mutex<Option<IOLimiter>>>,
+    limiter: Option<IOLimiter>,
 
-    cfg: GCConfig,
+    cfg: Getter<GCConfig>,
 
     stats: Statistics,
 }
@@ -178,9 +188,13 @@ impl<E: Engine> GCRunner<E> {
         engine: E,
         local_storage: Option<Arc<DB>>,
         raft_store_router: Option<ServerRaftStoreRouter>,
-        limiter: Arc<Mutex<Option<IOLimiter>>>,
-        cfg: GCConfig,
+        cfg: Getter<GCConfig>,
     ) -> Self {
+        let limiter = if cfg.max_write_bytes_per_sec.0 > 0 {
+            Some(IOLimiter::new(cfg.max_write_bytes_per_sec.0))
+        } else {
+            None
+        };
         Self {
             engine,
             local_storage,
@@ -290,7 +304,7 @@ impl<E: Engine> GCRunner<E> {
         let write_size = txn.write_size();
         let modifies = txn.into_modifies();
         if !modifies.is_empty() {
-            if let Some(limiter) = &*self.limiter.lock().unwrap() {
+            if let Some(ref limiter) = self.limiter {
                 limiter.request(write_size as i64);
             }
             self.engine.write(ctx, modifies)?;
@@ -307,6 +321,7 @@ impl<E: Engine> GCRunner<E> {
 
         let mut next_key = None;
         loop {
+            self.refresh_cfg();
             // Scans at most `GCConfig.batch_keys` keys
             let (keys, next) = self
                 .scan_keys(ctx, safe_point, next_key, self.cfg.batch_keys)
@@ -445,6 +460,21 @@ impl<E: Engine> GCRunner<E> {
             GC_GCTASK_FAIL_COUNTER_VEC.with_label_values(&[label]).inc();
         }
         (task.take_callback())(result);
+    }
+
+    fn refresh_cfg(&mut self) {
+        let old = self.cfg.max_write_bytes_per_sec;
+        if self.cfg.refresh() && old != self.cfg.max_write_bytes_per_sec {
+            let limit = self.cfg.max_write_bytes_per_sec.0;
+            if limit == 0 {
+                self.limiter.take();
+            } else {
+                self.limiter
+                    .get_or_insert_with(|| IOLimiter::new(limit))
+                    .set_bytes_per_second(limit as i64);
+            }
+            info!("GC io limit changed"; "max_write_bytes_per_sec" => limit);
+        }
     }
 }
 
@@ -1097,9 +1127,7 @@ pub struct GCWorker<E: Engine> {
     /// `raft_store_router` is useful to signal raftstore clean region size informations.
     raft_store_router: Option<ServerRaftStoreRouter>,
 
-    cfg: Option<GCConfig>,
-    limiter: Arc<Mutex<Option<IOLimiter>>>,
-
+    cfg: VersionCache<GCConfig>,
     /// How many strong references. The worker will be stopped
     /// once there are no more references.
     refs: Arc<atomic::AtomicUsize>,
@@ -1119,7 +1147,6 @@ impl<E: Engine> Clone for GCWorker<E> {
             local_storage: self.local_storage.clone(),
             raft_store_router: self.raft_store_router.clone(),
             cfg: self.cfg.clone(),
-            limiter: self.limiter.clone(),
             refs: self.refs.clone(),
             worker: self.worker.clone(),
             worker_scheduler: self.worker_scheduler.clone(),
@@ -1157,17 +1184,11 @@ impl<E: Engine> GCWorker<E> {
                 .create(),
         ));
         let worker_scheduler = worker.lock().unwrap().scheduler();
-        let limiter = if cfg.max_write_bytes_per_sec.0 > 0 {
-            Some(IOLimiter::new(cfg.max_write_bytes_per_sec.0))
-        } else {
-            None
-        };
         GCWorker {
             engine,
             local_storage,
             raft_store_router,
-            cfg: Some(cfg),
-            limiter: Arc::new(Mutex::new(limiter)),
+            cfg: VersionCache::new(cfg),
             refs: Arc::new(atomic::AtomicUsize::new(1)),
             worker,
             worker_scheduler,
@@ -1191,8 +1212,7 @@ impl<E: Engine> GCWorker<E> {
             self.engine.clone(),
             self.local_storage.take(),
             self.raft_store_router.take(),
-            self.limiter.clone(),
-            self.cfg.take().unwrap(),
+            self.cfg.getter(),
         );
         self.worker
             .lock()
@@ -1249,17 +1269,12 @@ impl<E: Engine> GCWorker<E> {
             .or_else(handle_gc_task_schedule_error)
     }
 
-    pub fn change_io_limit(&self, limit: u64) -> Result<()> {
-        let mut limiter = self.limiter.lock().unwrap();
-        if limit == 0 {
-            limiter.take();
-        } else {
-            limiter
-                .get_or_insert_with(|| IOLimiter::new(limit))
-                .set_bytes_per_second(limit as i64);
-        }
-        info!("GC io limit changed"; "max_write_bytes_per_sec" => limit);
-        Ok(())
+    pub fn cfg(&self) -> &VersionCache<GCConfig> {
+        &self.cfg
+    }
+
+    pub fn cfg_mgr(&self) -> ConfigMgr {
+        ConfigMgr(self.cfg.clone())
     }
 }
 
