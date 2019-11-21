@@ -6,8 +6,8 @@ use time::Duration as TimeDuration;
 
 use crate::config::{ConfigManager, TiKvConfig};
 use crate::raftstore::{coprocessor, Result};
-use tikv_util::broacast::Broacast;
 use tikv_util::config::{ReadableDuration, ReadableSize};
+use tikv_util::version_cache::VersionCache;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -571,19 +571,11 @@ impl Config {
     }
 }
 
-pub struct ConfigMgr(pub Broacast<Config>);
-
-impl ConfigMgr {
-    pub fn new(c: Config) -> Self {
-        ConfigMgr(Broacast::new(c))
-    }
-}
+pub struct ConfigMgr(pub VersionCache<Config>);
 
 impl ConfigManager for ConfigMgr {
-    // type Conf = Config;
-
     fn update(&mut self, incomming: &TiKvConfig) {
-        self.0.broacast(incomming.raft_store.clone());
+        self.0.replace(incomming.raft_store.clone());
     }
 }
 

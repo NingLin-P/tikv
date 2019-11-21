@@ -41,10 +41,10 @@ use crate::raftstore::store::util::check_region_epoch;
 use crate::raftstore::store::util::KeysInfoFormatter;
 use crate::raftstore::store::{cmd_resp, keys, util, Config};
 use crate::raftstore::{Error, Result};
-use tikv_util::broacast::Receiver as ConfigRecv;
 use tikv_util::escape;
 use tikv_util::mpsc::{loose_bounded, LooseBoundedSender, Receiver};
 use tikv_util::time::{duration_to_sec, Instant, SlowTimer};
+use tikv_util::version_cache::{Getter, Observer, VersionCache};
 use tikv_util::worker::Scheduler;
 use tikv_util::Either;
 use tikv_util::MustConsumeVec;
@@ -2730,12 +2730,13 @@ pub struct ApplyPoller {
     msg_buf: Vec<Msg>,
     apply_ctx: ApplyContext,
     messages_per_tick: usize,
-    cfg_recv: ConfigRecv<Config>,
+    cfg_ob: Option<Observer<Config>>,
 }
 
 impl PollHandler<ApplyFsm, ControlFsm> for ApplyPoller {
     fn begin(&mut self, _batch_size: usize) {
-        if let Some(incomming) = self.cfg_recv.any_new() {
+        let mut ob = self.cfg_ob.take().unwrap();
+        ob.observe(|incomming| {
             // update config
             if self.messages_per_tick != incomming.messages_per_tick {
                 self.messages_per_tick = incomming.messages_per_tick;
@@ -2747,7 +2748,8 @@ impl PollHandler<ApplyFsm, ControlFsm> for ApplyPoller {
             if self.apply_ctx.use_delete_range != incomming.use_delete_range {
                 self.apply_ctx.use_delete_range = incomming.use_delete_range;
             }
-        }
+        });
+        self.cfg_ob.replace(ob);
     }
 
     /// There is no control fsm in apply poller.
@@ -2805,14 +2807,14 @@ impl PollHandler<ApplyFsm, ControlFsm> for ApplyPoller {
 
 pub struct Builder {
     tag: String,
-    cfg: Arc<Config>,
+    cfg: Getter<Config>,
+    cfg_ob: Observer<Config>,
     coprocessor_host: Arc<CoprocessorHost>,
     importer: Arc<SSTImporter>,
     region_scheduler: Scheduler<RegionTask>,
     engines: Engines,
     sender: Notifier,
     router: ApplyRouter,
-    cfg_recv: ConfigRecv<Config>,
 }
 
 impl Builder {
@@ -2824,13 +2826,13 @@ impl Builder {
         Builder {
             tag: format!("[store {}]", builder.store.get_id()),
             cfg: builder.cfg.clone(),
+            cfg_ob: builder.cfg_ob.clone(),
             coprocessor_host: builder.coprocessor_host.clone(),
             importer: builder.importer.clone(),
             region_scheduler: builder.region_scheduler.clone(),
             engines: builder.engines.clone(),
             sender,
             router,
-            cfg_recv: builder.cfg_recv.clone(),
         }
     }
 }
@@ -2851,8 +2853,8 @@ impl HandlerBuilder<ApplyFsm, ControlFsm> for Builder {
                 self.sender.clone(),
                 &self.cfg,
             ),
+            cfg_ob: Some(self.cfg_ob.clone()),
             messages_per_tick: self.cfg.messages_per_tick,
-            cfg_recv: self.cfg_recv.clone(),
         }
     }
 }
