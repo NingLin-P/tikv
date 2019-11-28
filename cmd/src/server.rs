@@ -87,7 +87,7 @@ fn run_raft_server(pd_client: RpcClient, cfg: &TiKvConfig, security_mgr: Arc<Sec
     let snap_path = store_path.join(Path::new("snap"));
     let raft_db_path = Path::new(&cfg.raft_store.raftdb_path);
     let import_path = store_path.join("import");
-    let cfg_controller = ConfigController::new(cfg.clone());
+    let cfg_controller = ConfigController::new(0, 0, cfg.clone());
 
     let f = File::create(lock_path.as_path())
         .unwrap_or_else(|e| fatal!("failed to create lock at {}: {}", lock_path.display(), e));

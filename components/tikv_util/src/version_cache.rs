@@ -28,7 +28,7 @@ pub struct Observer<T> {
 }
 
 impl<T> VersionCacheInner<T> {
-    pub fn any_new(&self, version: u64) -> (bool, u64) {
+    fn any_new(&self, version: u64) -> (bool, u64) {
         let v = self.version.load(Ordering::Relaxed);
         if version < v {
             (true, v)

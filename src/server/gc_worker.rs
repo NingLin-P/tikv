@@ -27,6 +27,7 @@ use crate::storage::kv::{Engine, Error as EngineError, RegionInfoProvider, ScanM
 use crate::storage::metrics::*;
 use crate::storage::mvcc::{MvccReader, MvccTxn};
 use crate::storage::{Callback, Error, Key, Result};
+use config_template::Configable;
 use pd_client::PdClient;
 use tikv_util::config::ReadableSize;
 use tikv_util::time::{duration_to_sec, SlowTimer};
@@ -56,7 +57,7 @@ pub const DEFAULT_GC_BATCH_KEYS: usize = 512;
 // No limit
 const DEFAULT_GC_MAX_WRITE_BYTES_PER_SEC: u64 = 0;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Configable)]
 #[serde(default)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "kebab-case")]

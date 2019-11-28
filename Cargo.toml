@@ -71,7 +71,7 @@ rand = "0.6.5"
 quick-error = "1.2.2"
 tempfile = "3.0"
 time = "0.1"
-toml = "0.4"
+toml = "0.5.5"
 libc = "0.2"
 crc = "1.8"
 fs2 = "0.4"
@@ -126,6 +126,7 @@ keys = { path = "components/keys" }
 engine_traits = { path = "components/engine_traits" }
 sst_importer = { path = "components/sst_importer" }
 engine_rocks = { path = "components/engine_rocks" }
+config_template = { path = "components/config_template" }
 
 [dependencies.murmur3]
 git = "https://github.com/pingcap/murmur3.git"
@@ -186,6 +187,7 @@ members = [
   "components/tikv_alloc",
   "components/match_template",
   "components/codec",
+  "components/config_template",
   "components/panic_hook",
   "components/tipb_helper",
   "components/log_wrappers",
