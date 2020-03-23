@@ -517,6 +517,7 @@ impl<T: PdClient + ConfigClient> Runner<T> {
             .region_keys_read
             .observe(region_stat.read_keys as f64);
 
+        info!("spawn handle_heartbeat");
         let f = self
             .pd_client
             .region_heartbeat(term, region.clone(), peer, region_stat)
@@ -841,8 +842,8 @@ impl<T: PdClient + ConfigClient> Runner<T> {
 
 impl<T: PdClient + ConfigClient> Runnable<Task> for Runner<T> {
     fn run(&mut self, task: Task, handle: &Handle) {
-        debug!("executing task"; "task" => %task);
-
+        let s = format!("{}", task);
+        debug!("executing task"; "task" => s.clone());
         if !self.is_hb_receiver_scheduled {
             self.schedule_heartbeat_receiver(handle);
         }
@@ -955,6 +956,8 @@ impl<T: PdClient + ConfigClient> Runnable<Task> for Runner<T> {
             Task::RefreshConfig => self.handle_refresh_config(handle),
             Task::GetConfig { cfg_sender } => self.handle_get_config(cfg_sender),
         };
+
+        debug!("executing task finish"; "task" => s);
     }
 
     fn shutdown(&mut self) {

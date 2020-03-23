@@ -165,7 +165,7 @@ pub struct Config {
     pub store_pool_size: usize,
     #[config(skip)]
     pub future_poll_size: usize,
-    #[config(hidden)]
+    #[config(skip)]
     pub hibernate_regions: bool,
 
     // Deprecated! These two configuration has been moved to Coprocessor.

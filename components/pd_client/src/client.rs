@@ -322,7 +322,9 @@ impl PdClient for RpcClient {
         req.set_interval(interval);
 
         let executor = |client: &RwLock<Inner>, req: pdpb::RegionHeartbeatRequest| {
+            info!("to get client wl and start store_heartbeat");
             let mut inner = client.wl();
+            info!("got client wl");
             if let Either::Right(ref sender) = inner.hb_sender {
                 return Box::new(future::result(
                     sender
@@ -443,7 +445,9 @@ impl PdClient for RpcClient {
                 .client_stub
                 .store_heartbeat_async_opt(&req, Self::call_option())
                 .unwrap();
+            info!("store_heartbeat start");
             Box::new(handler.map_err(Error::Grpc).and_then(move |resp| {
+                info!("store_heartbeat finish");
                 PD_REQUEST_HISTOGRAM_VEC
                     .with_label_values(&["store_heartbeat"])
                     .observe(duration_to_sec(timer.elapsed()));
@@ -654,7 +658,10 @@ impl ConfigClient for RpcClient {
         req.set_component_id(id);
         req.set_version(version);
         let resp = sync_request(&self.leader_client, LEADER_CHANGE_RETRY, |client| {
-            client.config().get_opt(&req, Self::call_option())
+            info!("get_config ...");
+            let res = client.config().get_opt(&req, Self::call_option());
+            info!("get_config sucess");
+            return res;
         })?;
 
         Ok(resp)

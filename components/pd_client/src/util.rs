@@ -277,9 +277,10 @@ where
         self.request_sent += 1;
         debug!("request sent: {}", self.request_sent);
         let r = self.req.clone();
-
         Box::new(ok(self).and_then(|mut ctx| {
+            debug!(" (ctx.func)(&ctx.client.inner, r) begin");
             let req = (ctx.func)(&ctx.client.inner, r);
+            debug!(" (ctx.func)(&ctx.client.inner, r) finish");
             req.then(|resp| match resp {
                 Ok(resp) => {
                     ctx.resp = Some(Ok(resp));
@@ -346,10 +347,25 @@ where
 {
     let mut err = None;
     for _ in 0..retry {
+        let ret;
         // DO NOT put any lock operation in match statement, or it will cause dead lock!
-        let ret = { func(&client.inner.rl().client_stub).map_err(Error::Grpc) };
+        'a: loop {
+            match client.inner.try_read() {
+                Err(err) => {
+                    info!("try to get client inner fail"; "err" => ?err);
+                    continue;
+                }
+                Ok(c) => {
+                    info!("get client inner success");
+                    ret = func(&c.client_stub).map_err(Error::Grpc);
+                    info!("call func success");
+                    break 'a;
+                }
+            }
+        }
         match ret {
             Ok(r) => {
+                info!("call success return Ok(r)");
                 return Ok(r);
             }
             Err(e) => {
@@ -431,11 +447,13 @@ fn connect(
     let cb = ChannelBuilder::new(env)
         .keepalive_time(Duration::from_secs(10))
         .keepalive_timeout(Duration::from_secs(3));
-
     let channel = security_mgr.connect(cb, addr);
     let client = PdClientStub::new(channel);
     let option = CallOption::default().timeout(Duration::from_secs(REQUEST_TIMEOUT));
-    match client.get_members_opt(&GetMembersRequest::default(), option) {
+    info!("begin get_members_opt");
+    let res = client.get_members_opt(&GetMembersRequest::default(), option);
+    info!("get_members_opt finish");
+    match res {
         Ok(resp) => Ok((client, resp)),
         Err(e) => Err(Error::Grpc(e)),
     }
