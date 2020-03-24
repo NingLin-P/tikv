@@ -58,6 +58,7 @@ use tikv::{
 use tikv_util::config::VersionTrack;
 use tikv_util::{
     check_environment_variables,
+    config::ensure_dir_exist,
     security::SecurityManager,
     time::Monitor,
     worker::{FutureScheduler, FutureWorker, Worker},
@@ -195,6 +196,9 @@ impl TiKVServer {
             (config, configpb::Version::default())
         };
 
+        ensure_dir_exist(&config.storage.data_dir).unwrap();
+        ensure_dir_exist(&config.raft_store.raftdb_path).unwrap();
+
         validate_and_persist_config(&mut config, true);
         check_system_config(&config);
 
@@ -212,7 +216,7 @@ impl TiKVServer {
 
         config.write_into_metrics();
 
-        ConfigController::new(config, version)
+        ConfigController::new(config, version, true)
     }
 
     fn register_config(
@@ -649,7 +653,11 @@ impl TiKVServer {
         }
 
         // Create Diagnostics service
-        let diag_service = DiagnosticsService::new(pool, self.config.log_file.clone());
+        let diag_service = DiagnosticsService::new(
+            pool,
+            self.config.log_file.clone(),
+            self.config.slow_log_file.clone(),
+        );
         if servers
             .server
             .register_service(create_diagnostics(diag_service))
@@ -755,7 +763,10 @@ impl TiKVServer {
                 server.pd_sender.clone(),
             ));
             // Start the status server.
-            if let Err(e) = status_server.start(self.config.server.status_addr.clone()) {
+            if let Err(e) = status_server.start(
+                self.config.server.status_addr.clone(),
+                &self.config.security,
+            ) {
                 error!(
                     "failed to bind addr for status service";
                     "err" => %e
