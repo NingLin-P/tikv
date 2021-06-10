@@ -92,7 +92,7 @@ impl ObserveRegion {
                         ChangeLog::Error(e) => {
                             debug!(
                                 "skip change log error";
-                                "region" => self.meta.id,
+                                "region_id" => self.meta.id,
                                 "error" => ?e,
                             );
                             continue;
@@ -144,7 +144,7 @@ impl ObserveRegion {
                         ChangeLog::Error(e) => {
                             debug!(
                                 "skip change log error";
-                                "region" => self.meta.id,
+                                "region_id" => self.meta.id,
                                 "error" => ?e,
                             );
                             continue;
@@ -158,6 +158,7 @@ impl ObserveRegion {
                                 info!(
                                     "region met split/merge command, stop tracking since key range changed, wait for re-register";
                                     "req_type" => ?req_type,
+                                    "region_id" => self.meta.id,
                                 );
                                 // Stop tracking so that `tracked_index` larger than the split/merge command index won't be published
                                 // untill `RegionUpdate` event trigger the region re-register and re-scan the new key range
@@ -166,7 +167,7 @@ impl ObserveRegion {
                             _ => {
                                 debug!(
                                     "skip change log admin";
-                                    "region" => self.meta.id,
+                                    "region_id" => self.meta.id,
                                     "req_type" => ?req_type,
                                 );
                             }
@@ -232,7 +233,7 @@ impl ObserveRegion {
                         };
                     info!(
                         "Resolver initialized";
-                        "region" => self.meta.id,
+                        "region_id" => self.meta.id,
                         "observe_id" => ?self.handle.id,
                         "snapshot_index" => apply_index,
                         "pending_data_index" => pending_tracked_index,
@@ -304,6 +305,7 @@ where
                 info!(
                     "register observe region";
                     "store id" => ?store_meta.store_id.clone(),
+                    "region_id" => region.get_id(),
                     "region" => ?region
                 );
                 ObserveRegion::new(region.clone(), Arc::clone(read_progress))
@@ -311,6 +313,7 @@ where
                 warn!(
                     "try register unexit region";
                     "store id" => ?store_meta.store_id.clone(),
+                    "region_id" => region.get_id(),
                     "region" => ?region,
                 );
                 return;
@@ -396,7 +399,9 @@ where
     fn region_updated(&mut self, incoming_region: Region) {
         let region_id = incoming_region.get_id();
         if let Some(obs_region) = self.regions.get_mut(&region_id) {
-            if obs_region.meta.get_region_epoch() == incoming_region.get_region_epoch() {
+            if obs_region.meta.get_region_epoch().get_version()
+                == incoming_region.get_region_epoch().get_version()
+            {
                 // only peer list change, no need to re-register region
                 obs_region.meta = incoming_region;
                 return;
@@ -759,11 +764,11 @@ where
         RTS_MIN_RESOLVED_TS_REGION.set(oldest_region as i64);
         RTS_MIN_RESOLVED_TS.set(oldest_ts as i64);
         RTS_ZERO_RESOLVED_TS.set(zero_ts_count as i64);
-        RESOLVED_TS_GAP_HISTOGRAM.observe(
-            (TimeStamp::physical_now().saturating_sub(TimeStamp::from(oldest_ts).physical()))
-                as f64
-                / 1000f64,
-        );
+        let gap = (TimeStamp::physical_now().saturating_sub(TimeStamp::from(oldest_ts).physical()))
+            as f64
+            / 1000f64;
+        RTS_MIN_RESOLVED_TS_GAP.set(gap as i64);
+        RESOLVED_TS_GAP_HISTOGRAM.observe(gap);
         RTS_LOCK_HEAP_BYTES_GAUGE.set(lock_heap_size as i64);
         RTS_REGION_RESOLVE_STATUS_GAUGE_VEC
             .with_label_values(&["resolved"])

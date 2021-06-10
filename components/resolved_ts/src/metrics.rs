@@ -21,6 +21,11 @@ lazy_static! {
         exponential_buckets(0.001, 2.0, 24).unwrap()
     )
     .unwrap();
+    pub static ref RTS_MIN_RESOLVED_TS_GAP: IntGauge = register_int_gauge!(
+        "tikv_resolved_ts_min_resolved_ts_gap_seconds",
+        "The minimal (non-zero) resolved ts gap for observe regions"
+    )
+    .unwrap();
     pub static ref RTS_SCAN_DURATION_HISTOGRAM: Histogram = register_histogram!(
         "tikv_resolved_ts_scan_duration_seconds",
         "Bucketed histogram of resolved-ts async scan duration",

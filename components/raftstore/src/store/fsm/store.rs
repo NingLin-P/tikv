@@ -1004,8 +1004,6 @@ impl<EK: KvEngine, ER: RaftEngine, T> RaftPollerBuilder<EK, ER, T> {
             }
             meta.region_ranges.insert(enc_end_key(region), region_id);
             meta.regions.insert(region_id, region.clone());
-            meta.region_read_progress
-                .insert(region_id, peer.peer.read_progress.clone());
             // No need to check duplicated here, because we use region id as the key
             // in DB.
             region_peers.push((tx, peer));
@@ -1039,8 +1037,6 @@ impl<EK: KvEngine, ER: RaftEngine, T> RaftPollerBuilder<EK, ER, T> {
             peer.schedule_applying_snapshot();
             meta.region_ranges
                 .insert(enc_end_key(&region), region.get_id());
-            meta.region_read_progress
-                .insert(region.get_id(), peer.peer.read_progress.clone());
             meta.regions.insert(region.get_id(), region);
             region_peers.push((tx, peer));
         }
@@ -1340,6 +1336,8 @@ impl<EK: KvEngine, ER: RaftEngine> RaftBatchSystem<EK, ER> {
                 let peer = peer_fsm.get_peer();
                 meta.readers
                     .insert(peer_fsm.region_id(), ReadDelegate::from_peer(peer));
+                meta.region_read_progress
+                    .insert(peer_fsm.region_id(), peer.read_progress.clone());
             }
         }
 
@@ -1837,8 +1835,6 @@ impl<'a, EK: KvEngine, ER: RaftEngine, T: Transport> StoreFsmDelegate<'a, EK, ER
         // snapshot is applied.
         meta.regions
             .insert(region_id, peer.get_peer().region().to_owned());
-        meta.region_read_progress
-            .insert(region_id, peer.peer.read_progress.clone());
 
         let mailbox = BasicMailbox::new(tx, peer, self.ctx.router.state_cnt().clone());
         self.ctx.router.register(region_id, mailbox);
@@ -2448,7 +2444,7 @@ impl<'a, EK: KvEngine, ER: RaftEngine, T: Transport> StoreFsmDelegate<'a, EK, ER
                             }
                             return Some(leader_info.region_id);
                         }
-                        debug!("check leader failed";
+                        info!("check leader failed";
                             "leader_info" => ?leader_info,
                             "current_leader" => leader_id,
                             "current_term" => term,
@@ -2458,7 +2454,7 @@ impl<'a, EK: KvEngine, ER: RaftEngine, T: Transport> StoreFsmDelegate<'a, EK, ER
                         return None;
                     }
                 }
-                debug!("check leader failed, meta not found";
+                info!("check leader failed, meta not found";
                     "leader_info" => ?leader_info,
                     "store_id" => self.fsm.store.id,
                 );

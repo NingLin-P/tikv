@@ -93,7 +93,15 @@ impl Resolver {
             self.region_id
         );
         let key: Arc<[u8]> = key.into_boxed_slice().into();
-        self.locks_by_key.insert(key.clone(), start_ts);
+        if let Some(prev_ts) = self.locks_by_key.insert(key.clone(), start_ts) {
+            error!(
+                "Two locks on the same key, prev: {}@{}, incoming: {}@{}",
+                &log_wrappers::Value::key(&key),
+                prev_ts,
+                &log_wrappers::Value::key(&key),
+                start_ts
+            );
+        }
         self.lock_ts_heap.entry(start_ts).or_default().insert(key);
     }
 
@@ -104,6 +112,16 @@ impl Resolver {
         let start_ts = if let Some(start_ts) = self.locks_by_key.remove(key) {
             start_ts
         } else {
+            for (ts, key_set) in &self.lock_ts_heap {
+                if key_set.contains(key) {
+                    panic!(
+                        "Lock {}@{} exists in lock_ts_heap but not locks_by_key, region {}",
+                        &log_wrappers::Value::key(&key),
+                        ts,
+                        self.region_id
+                    );
+                }
+            }
             debug!("untrack a lock that was not tracked before"; "key" => &log_wrappers::Value::key(key));
             return;
         };
@@ -139,6 +157,19 @@ impl Resolver {
 
         // No more commit happens before the ts.
         let new_resolved_ts = cmp::min(min_start_ts, min_ts);
+
+        if self.resolved_ts >= new_resolved_ts {
+            info!(
+                "resolved-ts can't advance";
+                "track_index" => self.tracked_index,
+                "region_id" => self.region_id,
+                "current" => ?self.resolved_ts,
+                "incoming" => ?new_resolved_ts,
+                "pd_ts" => ?min_ts,
+                "min_lock" => ?min_lock,
+                "key" => ?self.lock_ts_heap.iter().next(),
+            );
+        }
 
         // Resolved ts never decrease.
         self.resolved_ts = cmp::max(self.resolved_ts, new_resolved_ts);

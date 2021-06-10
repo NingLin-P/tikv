@@ -1481,20 +1481,20 @@ where
         if util::is_epoch_stale(from_epoch, self.fsm.peer.region().get_region_epoch())
             && util::find_peer(self.fsm.peer.region(), from_store_id).is_none()
         {
-            let mut need_gc_msg = util::is_vote_msg(msg.get_message());
-            if msg.has_extra_msg() {
-                // A learner can't vote so it sends the check-stale-peer msg to others to find out whether
-                // it is removed due to conf change or merge.
-                need_gc_msg |=
-                    msg.get_extra_msg().get_type() == ExtraMessageType::MsgCheckStalePeer;
-                // For backward compatibility
-                need_gc_msg |= msg.get_extra_msg().get_type() == ExtraMessageType::MsgRegionWakeUp;
-            }
+            // let mut need_gc_msg = util::is_vote_msg(msg.get_message());
+            // if msg.has_extra_msg() {
+            //     // A learner can't vote so it sends the check-stale-peer msg to others to find out whether
+            //     // it is removed due to conf change or merge.
+            //     need_gc_msg |=
+            //         msg.get_extra_msg().get_type() == ExtraMessageType::MsgCheckStalePeer;
+            //     // For backward compatibility
+            //     need_gc_msg |= msg.get_extra_msg().get_type() == ExtraMessageType::MsgRegionWakeUp;
+            // }
             // The message is stale and not in current region.
             self.ctx.handle_stale_msg(
                 msg,
                 self.fsm.peer.region().get_region_epoch().clone(),
-                need_gc_msg,
+                true,
                 None,
             );
             return true;
@@ -3056,6 +3056,7 @@ where
             assert_eq!(prev, Some(r.get_id()));
             assert!(meta.regions.remove(&r.get_id()).is_some());
             meta.readers.remove(&r.get_id());
+            meta.region_read_progress.remove(&r.get_id());
         }
         // Remove the data from `atomic_snap_regions` and `destroyed_region_for_snap`
         // which are added before applying snapshot

@@ -1648,6 +1648,8 @@ where
             }
             CheckApplyingSnapStatus::Success => {
                 fail_point!("raft_before_applying_snap_finished");
+                // Resume `read_progress`
+                self.read_progress.resume();
                 // 0 means snapshot is scheduled after being restarted.
                 if self.last_unpersisted_number != 0 {
                     // Because we only handle raft ready when not applying snapshot, so following
@@ -1658,12 +1660,10 @@ where
                         self.term(),
                         self.raft_group.store().region(),
                     );
+                    // Update apply index to `last_applying_idx`
+                    self.read_progress.update_applied(self.last_applying_idx);
                 }
                 self.post_pending_read_index_on_replica(ctx);
-                // Resume `read_progress`
-                self.read_progress.resume();
-                // Update apply index to `last_applying_idx`
-                self.read_progress.update_applied(self.last_applying_idx);
                 if !self.pending_messages.is_empty() {
                     let msgs = mem::take(&mut self.pending_messages);
                     self.send(&mut ctx.trans, msgs, &mut ctx.raft_metrics.send_message);
@@ -1853,6 +1853,8 @@ where
             let mut meta = ctx.store_meta.lock().unwrap();
             meta.readers
                 .insert(self.region_id, ReadDelegate::from_peer(self));
+            meta.region_read_progress
+                .insert(self.region_id, self.read_progress.clone());
         } else if has_msg {
             let msgs = ready.take_persisted_messages();
             self.send(&mut ctx.trans, msgs, &mut ctx.raft_metrics.send_message);
