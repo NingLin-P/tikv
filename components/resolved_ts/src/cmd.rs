@@ -131,7 +131,7 @@ impl ChangeLog {
 }
 
 pub(crate) fn decode_write(key: &[u8], value: &[u8], is_apply: bool) -> Option<Write> {
-    let write = WriteRef::parse(value).ok()?.to_owned();
+    let write = WriteRef::parse(value).unwrap().to_owned();
     // Drop the record it self but keep only the overlapped rollback information if gc_fence exists.
     if is_apply && write.gc_fence.is_some() {
         // `gc_fence` is set means the write record has been rewritten.
@@ -150,7 +150,7 @@ pub(crate) fn decode_write(key: &[u8], value: &[u8], is_apply: bool) -> Option<W
 }
 
 pub(crate) fn decode_lock(key: &[u8], value: &[u8]) -> Option<Lock> {
-    let lock = Lock::parse(value).ok()?;
+    let lock = Lock::parse(value).unwrap();
     match lock.lock_type {
         LockType::Put | LockType::Delete => Some(lock),
         other => {
@@ -227,6 +227,7 @@ fn group_row_changes(requests: Vec<Request>) -> HashMap<Key, RowChange> {
                     CF_LOCK => {
                         let key = Key::from_encoded(delete.take_key());
                         let mut row = changes.entry(key).or_default();
+                        assert!(row.lock.is_none());
                         row.lock = Some(KeyOp::Delete);
                     }
                     "" | CF_WRITE | CF_DEFAULT => {}

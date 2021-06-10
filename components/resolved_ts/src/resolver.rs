@@ -86,7 +86,7 @@ impl Resolver {
         if let Some(index) = index {
             self.update_tracked_index(index);
         }
-        debug!(
+        info!(
             "track lock {}@{}, region {}",
             &log_wrappers::Value::key(&key),
             start_ts,
@@ -94,7 +94,7 @@ impl Resolver {
         );
         let key: Arc<[u8]> = key.into_boxed_slice().into();
         if let Some(prev_ts) = self.locks_by_key.insert(key.clone(), start_ts) {
-            error!(
+            panic!(
                 "Two locks on the same key, prev: {}@{}, incoming: {}@{}",
                 &log_wrappers::Value::key(&key),
                 prev_ts,
@@ -122,10 +122,10 @@ impl Resolver {
                     );
                 }
             }
-            debug!("untrack a lock that was not tracked before"; "key" => &log_wrappers::Value::key(key));
+            warn!("untrack a lock that was not tracked before"; "key" => &log_wrappers::Value::key(key));
             return;
         };
-        debug!(
+        info!(
             "untrack lock {}@{}, region {}",
             &log_wrappers::Value::key(key),
             start_ts,
@@ -159,6 +159,7 @@ impl Resolver {
         let new_resolved_ts = cmp::min(min_start_ts, min_ts);
 
         if self.resolved_ts >= new_resolved_ts {
+            let key = self.lock_ts_heap.iter().next();
             info!(
                 "resolved-ts can't advance";
                 "track_index" => self.tracked_index,
@@ -167,8 +168,20 @@ impl Resolver {
                 "incoming" => ?new_resolved_ts,
                 "pd_ts" => ?min_ts,
                 "min_lock" => ?min_lock,
-                "key" => ?self.lock_ts_heap.iter().next(),
+                "key" => ?key,
             );
+            if let Some((ts, key_set)) = key {
+                for k in key_set {
+                    if !self.locks_by_key.contains_key(k) {
+                        panic!(
+                            "Lock {}@{} exists in lock_ts_heap but not locks_by_key, region {}",
+                            &log_wrappers::Value::key(&k),
+                            ts,
+                            self.region_id
+                        );
+                    }
+                }
+            }
         }
 
         // Resolved ts never decrease.
